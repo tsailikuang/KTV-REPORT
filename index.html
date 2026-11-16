@@ -124,6 +124,13 @@ tr.calc-r td.iname{border-left:2px solid var(--green);padding-left:10px;color:va
 input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none}
 input[type=number]{-moz-appearance:textfield}
 @media(max-width:720px){.cards{grid-template-columns:1fr}.pbar{grid-template-columns:1fr}.rgrid{grid-template-columns:repeat(2,1fr)}}
+.rep-wrap{padding:16px}
+.rep-sec{margin-bottom:24px}
+.rep-h{font-size:14px;font-weight:700;margin-bottom:4px}
+.rep-sub{font-size:11px;color:var(--txt3);margin-bottom:10px}
+.rep-ul{margin:0 0 4px 18px;font-size:13px;line-height:1.85}
+.rep-co{padding:8px 12px;margin-bottom:10px;background:var(--bg);border-radius:var(--rs)}
+.rep-coh{font-weight:700;font-size:13px;margin-bottom:2px}
 </style>
 </head>
 <body>
@@ -672,7 +679,7 @@ function parseGenericExcel(rows){
 // ═══════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════
-let S={p1:'202512',p2:'202412',fs:{},allData:{},sec:'income',modal:null,mTab:'income',mForm:null};
+let S={p1:'202512',p2:'202412',fs:{},thr:10,allData:{},sec:'income',modal:null,mTab:'income',mForm:null};
 let _upTgt=null;
 
 // ═══════════════════════════════════════
@@ -783,7 +790,7 @@ async function doExport(){
   const colsPerCo = hasCmp ? (hasYE?5:4) : (hasYE?2:1);
   const totalCols = 2 + CO.length * colsPerCo;
   ws.columns = [
-    {width:24},{width:8},
+    {width:34},{width:8},
     ...Array(CO.length * colsPerCo).fill(null).map((_,i)=>{
       const sub=i%colsPerCo;
       if(sub===0||sub===1) return{width:14};
@@ -977,6 +984,110 @@ async function doExport(){
     rowIdx++; // 區塊間空一列
   }
 
+    // ── 五～八：變化分析（同一工作表接續排列）──
+  if(hasCmp){
+    const AN=buildAnalysis(S.thr||10);
+    if(AN.cos.length){
+      const lineH=t=>Math.max(18,Math.ceil(t.length*2/165)*15+4);
+      const addTextRow=(t,color)=>{
+        const r=ws.getRow(rowIdx++);
+        ws.mergeCells(rowIdx-1,1,rowIdx-1,totalCols);
+        applyCell(r.getCell(1),t,{bg:C.white,border:true,align:'left',color:color||C.txt});
+        r.getCell(1).alignment={vertical:'top',horizontal:'left',wrapText:true,indent:1};
+        r.height=lineH(t);
+      };
+      const HS={bold:true,color:C.hdrFg,bg:C.hdrBg,border:true,align:'center'};
+
+      // 五、摘要
+      addBanner('五、變化分析摘要（依數字自動產生，僅描述變動，不含原因推論）');
+      for(const co of AN.cos)
+        for(const s of AN.summary.filter(x=>x.co&&x.co.id===co.id)) addTextRow(`【${co.name}】${s.text}`);
+      for(const s of AN.summary.filter(x=>x.type==='cross')) addTextRow(s.text);
+      for(const s of AN.summary.filter(x=>x.type==='warn')) addTextRow(s.text,'FFC0392B');
+      rowIdx++;
+
+      // 六、財務比率變動
+      addBanner('六、財務比率變動分析（百分比率的變動單位為「個百分點」，EBITDA 為相對增減%）');
+      const hr=ws.getRow(rowIdx++); hr.height=30;
+      applyCell(hr.getCell(1),'比率',{...HS,align:'left'});
+      applyCell(hr.getCell(2),'變動單位',HS);
+      let hc=3;
+      for(const co of CO){
+        applyCell(hr.getCell(hc++),`${co.name}(${p1i?.short})`,HS);
+        applyCell(hr.getCell(hc++),`${co.name}(${p2i?.short})`,HS);
+        applyCell(hr.getCell(hc++),`${co.name} 變動`,HS);
+        applyCell(hr.getCell(hc++),`${co.name} 評價`,HS);
+      }
+      let z6=false;
+      for(const row of AN.ratios){
+        const bg=z6?C.zebra:C.white; z6=!z6;
+        const rr=ws.getRow(rowIdx++); rr.height=18;
+        applyCell(rr.getCell(1),`${row.r.label}（${row.m.better==='high'?'越高越佳':'越低越佳'}）`,{bg,border:true,align:'left'});
+        applyCell(rr.getCell(2),DT_UNIT[row.m.dt],{bg,border:true,align:'center',color:C.txt2,fontSize:9});
+        const vf=row.r.fmt==='pct'?'#,##0.0"%"':(row.r.fmt==='k'?'#,##0':'#,##0.00');
+        let cc=3;
+        for(const co of CO){
+          const c=row.cells[co.id];
+          if(!c){ for(let k=0;k<4;k++) applyCell(rr.getCell(cc++),'—',{bg,border:true,align:'center',color:C.txt2}); continue; }
+          const nv=(v)=>v!=null?{bg,border:true,align:'right',numFmt:vf}:{bg,border:true,align:'center',color:C.txt2};
+          applyCell(rr.getCell(cc++),c.v1!=null?c.v1:'—',nv(c.v1));
+          applyCell(rr.getCell(cc++),c.v2!=null?c.v2:'—',nv(c.v2));
+          const dcol=c.verdict==='good'?C.up:(c.verdict==='bad'?C.dn:C.txt2);
+          if(c.d==null) applyCell(rr.getCell(cc++),'—',{bg,border:true,align:'center',color:C.txt2});
+          else if(row.m.dt==='pct') applyCell(rr.getCell(cc++),c.d/100,{bg,border:true,align:'right',color:dcol,numFmt:'+0.0%;-0.0%;0.0%'});
+          else applyCell(rr.getCell(cc++),+c.d.toFixed(4),{bg,border:true,align:'right',color:dcol,numFmt:'+0.00;-0.00;0.00'});
+          applyCell(rr.getCell(cc++),c.verdict?VWORD[c.verdict]:'—',{bg,border:true,align:'center',color:dcol,bold:c.verdict==='good'||c.verdict==='bad'});
+        }
+      }
+      rowIdx++;
+
+      // 七、三家橫向比較
+      if(AN.rank.length){
+        addBanner('七、三家公司橫向比較（本期；EBITDA 金額、EPS 受規模／股數影響，不排名）');
+        const h7=ws.getRow(rowIdx++); h7.height=24;
+        applyCell(h7.getCell(1),'比率',{...HS,align:'left'});
+        applyCell(h7.getCell(2),'方向',HS);
+        [['本期較佳',3],['本期較弱',5],['改善最多',7],['轉差最多',9]].forEach(([t,c0])=>{
+          applyCell(h7.getCell(c0),t,HS); ws.mergeCells(rowIdx-1,c0,rowIdx-1,c0+1);
+        });
+        let z7=false;
+        for(const k of AN.rank){
+          const bg=z7?C.zebra:C.white; z7=!z7;
+          const r7=ws.getRow(rowIdx++); r7.height=18;
+          const u=DT_UNIT[k.row.m.dt];
+          applyCell(r7.getCell(1),k.row.r.label,{bg,border:true,align:'left'});
+          applyCell(r7.getCell(2),k.row.m.better==='high'?'越高越佳':'越低越佳',{bg,border:true,align:'center',color:C.txt2,fontSize:9});
+          const put=(c0,txt,color)=>{ applyCell(r7.getCell(c0),txt,{bg,border:true,align:'left',color:color||C.txt}); ws.mergeCells(rowIdx-1,c0,rowIdx-1,c0+1); };
+          put(3,`${k.best.co.name}　${fmtRV(k.best.v1,k.row.r)}`);
+          put(5,`${k.worst.co.name}　${fmtRV(k.worst.v1,k.row.r)}`);
+          put(7,k.lead?`${k.lead.co.name}　${sgn(k.lead.d)}${u}`:'—',k.lead?C.up:C.txt2);
+          put(9,k.lag?`${k.lag.co.name}　${sgn(k.lag.d)}${u}`:'—',k.lag?C.dn:C.txt2);
+        }
+        rowIdx++;
+      }
+
+      // 八、重大科目變動明細
+      addBanner(`八、重大科目變動明細（|增減%| ≥ ${AN.thr}%，且增減額 ≥ 1,000 千元；EPS ≥ 0.05 元）`);
+      const h8=ws.getRow(rowIdx++); h8.height=24;
+      ['科目','公司代號',`本期(${p1i?.short})`,`比較期(${p2i?.short})`,'增減額','增減%'].forEach((t,i)=>applyCell(h8.getCell(i+1),t,{...HS,align:i===0?'left':'center'}));
+      const mat=AN.items.filter(x=>x.material).sort((a,b)=>AN.cos.indexOf(a.co)-AN.cos.indexOf(b.co)||Math.abs(b.dp)-Math.abs(a.dp));
+      if(!mat.length) addTextRow('無超過門檻的科目變動',C.txt2);
+      let z8=false;
+      for(const x of mat){
+        const bg=z8?C.zebra:C.white; z8=!z8;
+        const r8=ws.getRow(rowIdx++); r8.height=18;
+        const nf=x.isEPS?'#,##0.00':'#,##0', col=x.dp>0?C.up:C.dn;
+        applyCell(r8.getCell(1),`${x.co.name}　${x.label}`,{bg,border:true,align:'left'});
+        applyCell(r8.getCell(2),x.co.id,{bg,border:true,align:'center',color:C.txt2,fontSize:9});
+        applyCell(r8.getCell(3),x.v1,{bg,border:true,align:'right',numFmt:nf});
+        applyCell(r8.getCell(4),x.v2,{bg,border:true,align:'right',numFmt:nf});
+        applyCell(r8.getCell(5),x.da,{bg,border:true,align:'right',color:col,numFmt:x.isEPS?'+#,##0.00;-#,##0.00':'+#,##0;-#,##0'});
+        applyCell(r8.getCell(6),x.dp/100,{bg,border:true,align:'right',color:col,numFmt:'+0.0%;-0.0%;0.0%'});
+      }
+      rowIdx++;
+    }
+  }
+
   // ── 頁尾 ──
   const footRow=ws.getRow(rowIdx);
   ws.mergeCells(rowIdx,1,rowIdx,totalCols);
@@ -984,8 +1095,12 @@ async function doExport(){
     `產製時間：${new Date().toLocaleString('zh-TW')}　‧　數據以公開資訊觀測站原始報告為準`,
     {fontSize:8,color:'FF888888',bg:C.white,align:'right'});
 
+  ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,paperSize:9};
   // ── 凍結首欄 ──
   ws.views=[{state:'frozen',xSplit:2,ySplit:3,showGridLines:false}];
+
+  // 標題列文字過長時自動換行（避免「增減額」「評價」等被截斷）
+  ws.eachRow(r=>{ const f=r.getCell(2).fill; if(f&&f.fgColor&&f.fgColor.argb==='FF2F5597') r.eachCell(cl=>{cl.alignment={...cl.alignment,wrapText:true,vertical:'middle'};}); });
 
   // ── 下載 ──
   const buf=await wb.xlsx.writeBuffer();
@@ -1109,7 +1224,7 @@ function render(){
     </div>`;
   }).join('');
 
-  const tabList=[{k:'income',l:'損益科目'},{k:'balance',l:'資產負債'},{k:'cashflow',l:'現金流量'},{k:'ratios',l:'財務比率'},...(hasTrend?[{k:'trend',l:'趨勢圖'}]:[])];
+  const tabList=[{k:'income',l:'損益科目'},{k:'balance',l:'資產負債'},{k:'cashflow',l:'現金流量'},{k:'ratios',l:'財務比率'},{k:'report',l:'📈 分析報告'},...(hasTrend?[{k:'trend',l:'趨勢圖'}]:[])];
   const tabsH=tabList.map(t=>`<button class="tab${S.sec===t.k?' active':''}" onclick="setSec('${t.k}')">${t.l}</button>`).join('');
 
   let content='';
@@ -1122,6 +1237,8 @@ function render(){
         <b>錢櫃 Q1・Q3</b>　上傳自製 Excel (.xlsx)，自動識別格式＋解析兩期<br>
         <span style="color:var(--txt3);font-size:11px">MOPS：mops.twse.com.tw → 財務報告 → 選年季 → XBRL</span>
       </div></div>`;
+  } else if(S.sec==='report'){
+    content=renderReport();
   } else if(S.sec==='trend'){
     const pillsH=RATIOS.map(r=>`<button class="pill${_tm===r.key?' active':''}" onclick="setTM('${r.key}')">${r.label}</button>`).join('');
     const legH=CO.map(c=>`<div class="legi"><div class="legl" style="background:${c.color}"></div>${c.id} ${c.name}</div>`).join('');
@@ -1215,20 +1332,26 @@ function isNoXbrl(co,pKey){ return co.noQ13 && /(03|09)$/.test(pKey); }  // 錢�
 
 async function fetchMopsText(co,pKey){
   const yr=pKey.slice(0,4), file=mopsFile(co,pKey);
-  const attempts=[];
-  if(/^https?:/.test(location.protocol)) attempts.push(`/api/mops?year=${yr}&file=${encodeURIComponent(file)}`); // Vercel 代理
-  attempts.push(mopsUrl(co,pKey));                                                                               // 直連（通常被CORS擋）
-  let lastErr=null;
-  for(const u of attempts){
-    try{
-      const r=await fetch(u);
-      if(!r.ok){lastErr=new Error('HTTP '+r.status);continue;}
-      const t=await r.text();
-      if(/ix:nonFraction/i.test(t)) return t;
-      lastErr=new Error('NOFILE');
-    }catch(e){lastErr=e;}
+  if(/^https?:/.test(location.protocol)){
+    // 經代理（Vercel /api/mops 或本機 server.js）
+    let r;
+    try{ r=await fetch(`/api/mops?year=${yr}&file=${encodeURIComponent(file)}`); }
+    catch(e){ throw new Error('PROXY_NET'); }
+    const body=await r.text();
+    if(r.ok){ if(/ix:nonFraction/i.test(body)) return body; throw new Error('NOFILE|'); }
+    if(r.status===404&&body.startsWith('NOFILE')) throw new Error(body);
+    throw new Error(`PROXY_${r.status}:${body.slice(0,100)}`);
   }
-  throw lastErr||new Error('FAIL');
+  // 以本機檔案(file://)開啟：只能直連，通常被 CORS 擋
+  try{
+    const r=await fetch(mopsUrl(co,pKey));
+    const t=await r.text();
+    if(r.ok&&/ix:nonFraction/i.test(t)) return t;
+    throw new Error('NOFILE|');
+  }catch(e){
+    if(String(e.message).startsWith('NOFILE')) throw e;
+    throw new Error('LOCAL_CORS');
+  }
 }
 
 function ingestXBRL(cid,text){
@@ -1261,8 +1384,15 @@ async function fetchOne(co,pKey,force){
   }catch(e){
     const m=String(e&&e.message||e);
     let msg;
-    if(m==='NOFILE'||/HTTP 404/.test(m)) msg='❌ MOPS 查無此檔（尚未公布或檔名不符），可改用備援上傳';
-    else if(/Failed to fetch|NetworkError|Load failed/i.test(m)) msg='❌ 無法連線 MOPS（CORS）。請部署 /api/mops 代理，或改用備援上傳 XBRL';
+    if(m.startsWith('NOFILE')){
+      const snip=(m.split('|')[1]||'').trim();
+      msg='❌ MOPS 查無此檔（尚未公布／檔名不符）'+(snip?`；MOPS 回應：「${snip}」`:'')+'，可改用備援上傳';
+    }
+    else if(m==='LOCAL_CORS') msg='❌ 目前是以本機檔案開啟，瀏覽器擋住跨網域請求。請執行 node server.js 後開 http://localhost:3000，或部署到 Vercel';
+    else if(m==='PROXY_NET')  msg='❌ 連不到 /api/mops（網路中斷或網址錯誤）';
+    else if(m.startsWith('PROXY_404')) msg='❌ 找不到 /api/mops（api 資料夾是否一併部署？）';
+    else if(m.startsWith('PROXY_502')) msg='❌ 代理連不上 MOPS：'+m.slice(10);
+    else if(m.startsWith('PROXY_'))    msg='❌ 代理回應異常 HTTP '+m.slice(6);
     else msg='❌ 抓取失敗：'+m;
     S.fs[co.id]={st:'err',msg};
   }
@@ -1280,6 +1410,193 @@ async function autoFetchAll(force){
   const bad=CO.filter(c=>S.fs[c.id]?.st==='err').length;
   toast(`自動抓取完成：成功 ${ok} 家${bad?`，失敗 ${bad} 家`:''}`,bad===0);
 }
+// ═══════════════════════════════════════
+//  變化分析報告（科目變動＋財務比率變動＋三家比較）
+// ═══════════════════════════════════════
+const RMETA={
+  debtToAssets:{better:'low', dt:'pp'},
+  currentRatio:{better:'high',dt:'x'},
+  quickRatio:  {better:'high',dt:'x'},
+  roe:         {better:'high',dt:'pp'},
+  opMargin:    {better:'high',dt:'pp'},
+  ebitda:      {better:'high',dt:'pct'},
+  ebitdaM:     {better:'high',dt:'pp'},
+  eps:         {better:'high',dt:'amt'},
+};
+const DT_EPS={pp:0.05,x:0.005,amt:0.005,pct:0.05};   // 小於此值視為持平
+const DT_UNIT={pp:'個百分點',x:'倍',amt:'元',pct:'%'};
+const VWORD={good:'改善',bad:'轉差',flat:'持平'};
+function sgn(v,d=2){
+  if(Math.abs(v)<Math.pow(10,-d)/2) return (0).toFixed(d);
+  return (v>0?'+':'')+v.toFixed(d);
+}
+function fmtRV(v,r){
+  if(v==null) return '—';
+  if(r.fmt==='k') return Math.round(v).toLocaleString('zh-TW');
+  if(r.fmt==='pct') return v.toFixed(1)+'%';
+  return v.toFixed(2)+(r.fmt==='x2'?' 倍':' 元');
+}
+function chgTxt(dp){
+  if(dp==null) return '比較期為0，無法計算增減%';
+  if(Math.abs(dp)<0.05) return '與比較期持平';
+  return dp>0?`增加 ${dp.toFixed(1)}%`:`減少 ${Math.abs(dp).toFixed(1)}%`;
+}
+
+function buildAnalysis(thr){
+  thr=thr||10;
+  const p1d=S.allData[S.p1]||{}, p2d=S.allData[S.p2]||{};
+  const cos=CO.filter(c=>p1d[c.id]&&p2d[c.id]);                 // 主期＋比較期都有的公司
+  const missing=CO.filter(c=>!(p1d[c.id]&&p2d[c.id]));
+  const A={thr,cos,missing,items:[],ratios:[],rank:[],summary:[]};
+
+  // 1) 科目變動
+  const SECS=[['income',INC_ITEMS],['balance',BAL_ITEMS],['cashflow',CF_ITEMS]];
+  for(const co of cos) for(const [sec,list] of SECS) for(const it of list){
+    let v1=gv(p1d[co.id],sec,it.key), v2=gv(p2d[co.id],sec,it.key);
+    if(v1==null||v2==null) continue;
+    let label=it.label.replace(/[▸⚡]/g,'').trim();
+    if(it.key==='capex'||it.key==='leasePrincipal'){ v1=Math.abs(v1); v2=Math.abs(v2); label+='（支出金額）'; }
+    const da=v1-v2, dp=v2!==0?da/Math.abs(v2)*100:null;
+    const minAbs=it.isEPS?0.05:1000;                              // 濾除小額雜訊
+    A.items.push({co,sec,key:it.key,label,isEPS:!!it.isEPS,
+      v1,v2,da,dp,material:dp!=null&&Math.abs(dp)>=thr&&Math.abs(da)>=minAbs});
+  }
+
+  // 2) 財務比率變動
+  for(const r of RATIOS){
+    const m=RMETA[r.key]; if(!m) continue;
+    const row={r,m,cells:{}};
+    for(const co of cos){
+      const rt1=ratios(p1d[co.id]), rt2=ratios(p2d[co.id]);
+      const v1=rt1[r.key], v2=rt2[r.key];
+      let d=null;
+      if(v1!=null&&v2!=null) d=m.dt==='pct'?(v2!==0?(v1-v2)/Math.abs(v2)*100:null):(v1-v2);
+      let verdict=null;
+      if(d!=null) verdict=Math.abs(d)<DT_EPS[m.dt]?'flat':(((m.better==='high')===(d>0))?'good':'bad');
+      row.cells[co.id]={v1,v2,d,verdict};
+    }
+    A.ratios.push(row);
+  }
+
+  // 3) 三家橫向比較（EBITDA 金額、EPS 受規模／股數影響，不排名）
+  for(const row of A.ratios){
+    if(row.r.key==='ebitda'||row.r.key==='eps') continue;
+    const list=cos.map(co=>({co,...row.cells[co.id]})).filter(x=>x.v1!=null);
+    if(list.length<2) continue;
+    const hi=row.m.better==='high';
+    const byLvl=[...list].sort((a,b)=>hi?b.v1-a.v1:a.v1-b.v1);
+    const withD=list.filter(x=>x.d!=null).map(x=>({...x,imp:hi?x.d:-x.d})).sort((a,b)=>b.imp-a.imp);
+    A.rank.push({row,best:byLvl[0],worst:byLvl[byLvl.length-1],
+      lead:(withD.length&&withD[0].imp>0)?withD[0]:null,
+      lag:(withD.length>1&&withD[withD.length-1].imp<0)?withD[withD.length-1]:null});
+  }
+
+  // 4) 摘要文字（僅描述數字，不推論原因）
+  const find=(co,sec,key)=>A.items.find(x=>x.co.id===co.id&&x.sec===sec&&x.key===key);
+  for(const co of cos){
+    const parts=[];
+    for(const [sec,key,nm] of [['income','revenue','營收'],['income','opIncome','營業淨利'],['income','netIncome','稅後淨利'],['income','ebitda','EBITDA']]){
+      const x=find(co,sec,key); if(x) parts.push(`${nm} ${fmtK(x.v1)} 千元（${chgTxt(x.dp)}）`);
+    }
+    const e=find(co,'income','eps'); if(e) parts.push(`EPS ${e.v1.toFixed(2)} 元（比較期 ${e.v2.toFixed(2)} 元）`);
+    if(parts.length) A.summary.push({co,type:'items',text:`科目：${parts.join('；')}。`});
+
+    const rp=[];
+    for(const row of A.ratios){
+      if(row.r.key==='ebitda'||row.r.key==='eps') continue;
+      const c=row.cells[co.id]; if(!c||c.v1==null) continue;
+      rp.push(`${row.r.label} ${fmtRV(c.v1,row.r)}`+(c.d!=null?`（${sgn(c.d)}${DT_UNIT[row.m.dt]}，${VWORD[c.verdict]}）`:''));
+    }
+    if(rp.length) A.summary.push({co,type:'ratios',text:`財務比率：${rp.join('；')}。`});
+
+    const top=A.items.filter(x=>x.co.id===co.id&&x.material).sort((a,b)=>Math.abs(b.dp)-Math.abs(a.dp)).slice(0,3);
+    A.summary.push({co,type:'top',text:top.length
+      ?`變動幅度最大科目：${top.map(x=>`${x.label} ${sgn(x.dp,1)}%`).join('、')}（門檻 ±${thr}%）。`
+      :`無超過 ±${thr}% 門檻之重大科目變動。`});
+  }
+  for(const k of A.rank){
+    const u=DT_UNIT[k.row.m.dt];
+    A.summary.push({type:'cross',text:`【${k.row.r.label}】本期較佳：${k.best.co.name}（${fmtRV(k.best.v1,k.row.r)}），較弱：${k.worst.co.name}（${fmtRV(k.worst.v1,k.row.r)}）`
+      +(k.lead?`；改善最多：${k.lead.co.name}（${sgn(k.lead.d)}${u}）`:'；無公司改善')
+      +(k.lag?`；轉差最多：${k.lag.co.name}（${sgn(k.lag.d)}${u}）`:'')+'。'});
+  }
+  if(missing.length) A.summary.push({type:'warn',text:`${missing.map(c=>c.name).join('、')} 缺少主期或比較期資料，未納入分析。`});
+  return A;
+}
+
+function renderReport(){
+  const A=buildAnalysis(S.thr);
+  const p2i=pp(S.p2);
+  if(!A.cos.length) return `<div class="empty"><div class="empty-icon">📈</div>
+    <div style="font-size:15px;font-weight:700;margin-bottom:6px">需要同時有主期與比較期資料才能產生分析報告</div>
+    <div class="esteps">請先自動抓取或上傳至少一家公司的財報（XBRL 內已含比較期）。</div></div>`;
+
+  const thrBtns=[5,10,20,30].map(n=>`<button class="pill${A.thr===n?' active':''}" onclick="setThr(${n})">±${n}%</button>`).join('');
+  const li=arr=>arr.map(s=>`<li>${s.text}</li>`).join('');
+  const SEC_NAME={income:'損益',balance:'資產負債',cashflow:'現金流量'};
+
+  // 一、摘要
+  const coBlocks=A.cos.map(co=>`<div class="rep-co" style="border-left:3px solid ${co.color}">
+      <div class="rep-coh" style="color:${co.color}">${co.id} ${co.name}（${co.type}）</div>
+      <ul class="rep-ul">${li(A.summary.filter(s=>s.co&&s.co.id===co.id))}</ul></div>`).join('');
+  const crossLis=li(A.summary.filter(s=>s.type==='cross'));
+  const warnLis=li(A.summary.filter(s=>s.type==='warn'));
+  const sec1=`<div class="rep-sec"><div class="rep-h">一、重點摘要</div>
+    <div class="rep-sub">依數字自動產生，僅描述變動，不含原因推論；比較基準：${p2i?.full||S.p2}</div>
+    ${coBlocks}
+    ${crossLis?`<div class="rep-co" style="border-left:3px solid var(--txt3)"><div class="rep-coh">三家橫向比較（本期）</div><ul class="rep-ul">${crossLis}</ul></div>`:''}
+    ${warnLis?`<div class="alert aw"><ul class="rep-ul" style="margin:0 0 0 16px">${warnLis}</ul></div>`:''}</div>`;
+
+  // 二、財務比率變動
+  const thC=A.cos.map(c=>`<th style="color:${c.color}">${c.id} ${c.name}</th>`).join('');
+  const rrows=A.ratios.map(row=>{
+    const tds=A.cos.map(co=>{
+      const c=row.cells[co.id];
+      const col=c.verdict==='good'?'var(--up)':c.verdict==='bad'?'var(--dn)':'var(--txt3)';
+      const arrow=c.d==null?'':(c.d>0.00001?'▲':c.d<-0.00001?'▼':'—');
+      const tag=c.d==null?'':`<span style="font-size:11px;color:${col}">${arrow}${sgn(c.d)}${DT_UNIT[row.m.dt]}　${VWORD[c.verdict]}</span>`;
+      return `<td class="num"><div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px">
+        <span style="font-weight:700">${fmtRV(c.v1,row.r)}</span>
+        <span style="font-size:10px;color:var(--txt3)">比較期 ${fmtRV(c.v2,row.r)}</span>${tag}</div></td>`;
+    }).join('');
+    return `<tr><td class="iname">${row.r.label}<div style="font-size:10px;color:var(--txt3)">${row.m.better==='high'?'越高越佳':'越低越佳'}・變動單位：${DT_UNIT[row.m.dt]}</div></td>${tds}</tr>`;
+  }).join('');
+  const sec2=`<div class="rep-sec"><div class="rep-h">二、財務比率變動</div>
+    <div class="rep-sub">百分比率的變動以「個百分點」表示；EBITDA 金額以相對增減%表示</div>
+    <div class="panel-inner"><table><thead><tr><th class="left">比率</th>${thC}</tr></thead><tbody>${rrows}</tbody></table></div></div>`;
+
+  // 三、橫向比較
+  const nm=x=>x?`<span style="color:${x.co.color};font-weight:700">${x.co.name}</span>`:'—';
+  const rk=A.rank.map(k=>{
+    const r=k.row.r,u=DT_UNIT[k.row.m.dt];
+    return `<tr><td class="iname">${r.label}<div style="font-size:10px;color:var(--txt3)">${k.row.m.better==='high'?'越高越佳':'越低越佳'}</div></td>
+      <td>${nm(k.best)} <span class="num">${fmtRV(k.best.v1,r)}</span></td>
+      <td>${nm(k.worst)} <span class="num">${fmtRV(k.worst.v1,r)}</span></td>
+      <td>${k.lead?`${nm(k.lead)} <span class="num cu">${sgn(k.lead.d)}${u}</span>`:'—'}</td>
+      <td>${k.lag?`${nm(k.lag)} <span class="num cd">${sgn(k.lag.d)}${u}</span>`:'—'}</td></tr>`;
+  }).join('');
+  const sec3=A.rank.length?`<div class="rep-sec"><div class="rep-h">三、三家公司橫向比較（本期）</div>
+    <div class="rep-sub">EBITDA 金額、EPS 受規模／股數影響，不列入排名</div>
+    <div class="panel-inner"><table><thead><tr><th class="left">比率</th><th class="left">本期較佳</th><th class="left">本期較弱</th><th class="left">改善最多</th><th class="left">轉差最多</th></tr></thead><tbody>${rk}</tbody></table></div></div>`:'';
+
+  // 四、重大科目變動明細
+  const mat=A.items.filter(x=>x.material).sort((a,b)=>A.cos.indexOf(a.co)-A.cos.indexOf(b.co)||Math.abs(b.dp)-Math.abs(a.dp));
+  const mrows=mat.map(x=>{
+    const cl=x.dp>0?'var(--up)':'var(--dn)';
+    return `<tr><td style="color:${x.co.color};font-weight:700;white-space:nowrap">${x.co.name}</td><td class="iname">${x.label}<span style="font-size:10px;color:var(--txt3)">　${SEC_NAME[x.sec]}</span></td>
+      <td class="num">${fmtK(x.v1,x.isEPS)}</td><td class="num">${fmtK(x.v2,x.isEPS)}</td>
+      <td class="num" style="color:${cl}">${x.isEPS?sgn(x.da):(x.da>0?'+':'')+fmtK(x.da)}</td>
+      <td class="num" style="color:${cl}">${x.dp>0?'▲':'▼'}${Math.abs(x.dp).toFixed(1)}%</td></tr>`;
+  }).join('');
+  const sec4=`<div class="rep-sec"><div class="rep-h">四、重大科目變動明細</div>
+    <div class="rep-sub">門檻：|增減%| ≥ ${A.thr}% 且增減額 ≥ 1,000 千元（EPS ≥ 0.05 元），用以濾除小額雜訊</div>
+    ${mat.length?`<div class="panel-inner"><table><thead><tr><th class="left">公司</th><th class="left">科目</th><th>本期</th><th>比較期</th><th>增減額</th><th>增減%</th></tr></thead><tbody>${mrows}</tbody></table></div>`
+      :`<div style="padding:14px;color:var(--txt2);font-size:13px">無超過門檻的科目變動</div>`}</div>`;
+
+  return `<div class="rep-wrap"><div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap"><span style="font-size:12px;color:var(--txt2)">重大科目變動門檻</span>${thrBtns}</div>${sec1}${sec2}${sec3}${sec4}</div>`;
+}
+window.setThr=n=>{S.thr=n;render();};
+
 window.fetchOneBtn=cid=>{const co=CO.find(c=>c.id===cid);fetchOne(co,S.p1,true).then(render);};
 window.autoFetchAll=autoFetchAll;
 window.applyP=(k,v)=>{ if(k!=='p1')return; const c=v.replace(/\D/g,'').slice(0,6); if(c.length===6&&c!==S.p1){S.p1=c;autoFetchAll(false);} };
